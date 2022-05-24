@@ -26,10 +26,10 @@ contract CTokenStorage {
     uint8 public decimals;
 
     /**
-     * @notice Maximum borrow rate that can ever be applied (.0005% / block)
+     * @notice Maximum borrow rate that can ever be applied (.005% / block)
      */
 
-    uint internal constant borrowRateMaxMantissa = 0.0005e16;
+    uint internal constant borrowRateMaxMantissa = 0.005e16;
 
     /**
      * @notice Maximum fraction of interest that can be set aside for reserves
@@ -115,6 +115,29 @@ contract CTokenStorage {
      * @notice Mapping of account addresses to outstanding borrow balances
      */
     mapping(address => BorrowSnapshot) internal accountBorrows;
+
+    /**
+     * @notice Container for trusted account information
+     */
+    struct TrustedAccount {
+        uint allowance;
+        bool exists;
+    }
+
+    /**
+     * @notice Trusted suppliers mapping
+     */
+    mapping(address => TrustedAccount) internal trustedSuppliers;
+
+    /**
+     * @notice Trusted borrowers mapping
+     */
+    mapping(address => TrustedAccount) internal trustedBorrowers;
+
+    /**
+     * @notice Trusted admins mapping
+     */
+    mapping(address => bool) internal trustedAdmins;
 }
 
 contract CTokenInterface is CTokenStorage {
@@ -209,6 +232,21 @@ contract CTokenInterface is CTokenStorage {
      */
     event Failure(uint error, uint info, uint detail);
 
+    /**
+     * @notice Event emitted when trusted supplier is configured
+     */
+    event TrustedSupplier(address indexed account, bool oldExists, uint oldAllowance, bool newExists, uint newAllowance);
+
+    /**
+     * @notice Event emitted when trusted borrower is configured
+     */
+    event TrustedBorrower(address indexed account, bool oldExists, uint oldAllowance, bool newExists, uint newAllowance);
+
+    /**
+     * @notice Event emitted when trusted admin is configured
+     */
+    event TrustedAdmin(address indexed account, bool enabled);
+
 
     /*** User Interface ***/
 
@@ -239,6 +277,16 @@ contract CTokenInterface is CTokenStorage {
     function _setReserveFactor(uint newReserveFactorMantissa) external returns (uint);
     function _reduceReserves(uint reduceAmount) external returns (uint);
     function _setInterestRateModel(InterestRateModel newInterestRateModel) public returns (uint);
+
+
+    /*** Trusted Functions ***/
+
+    function getTrustedAdmin(address account) external view returns (bool);
+    function getTrustedSupplier(address account) external view returns (bool, uint);
+    function getTrustedBorrower(address account) external view returns (bool, uint);
+    function _setTrustedAdmin(address account, bool enabled) external returns (uint);
+    function _setTrustedSupplier(address account, bool exists, uint supplyAllowance) external returns (uint);
+    function _setTrustedBorrower(address account, bool exists, uint borrowAllowance) external returns (uint);
 }
 
 contract CErc20Storage {
@@ -265,6 +313,12 @@ contract CErc20Interface is CErc20Storage {
     /*** Admin Functions ***/
 
     function _addReserves(uint addAmount) external returns (uint);
+
+
+    /*** Trusted Functions ***/
+
+    function borrowTrusted(uint totalAmount, uint borrowAmount, address treasury) external returns (uint);
+    function repayBorrowBehalfTrusted(address borrower, uint repayAmount) external returns (uint);
 }
 
 contract CDelegationStorage {

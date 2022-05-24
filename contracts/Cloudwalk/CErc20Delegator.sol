@@ -473,4 +473,95 @@ contract CErc20Delegator is CTokenInterface, CErc20Interface, CDelegatorInterfac
             default { return(free_mem_ptr, returndatasize) }
         }
     }
+
+
+    /*** Trusted Functions ***/
+
+    /**
+     * @notice Checks if the account is a trusted admin
+     * @param account The address to check
+     * @return True if trusted admin
+     */
+    function getTrustedAdmin(address account) external view returns (bool) {
+        bytes memory data = delegateToViewImplementation(abi.encodeWithSignature("getTrustedAdmin(address)", account));
+        return abi.decode(data, (bool));
+    }
+
+    /**
+     * @notice Checks if the account is a trusted supplier
+     * @param account The address to check
+     * @return (true if trusted supplier, supply allowance)
+     */
+    function getTrustedSupplier(address account) external view returns (bool, uint) {
+        bytes memory data = delegateToViewImplementation(abi.encodeWithSignature("getTrustedSupplier(address)", account));
+        return abi.decode(data, (bool, uint));
+    }
+
+    /**
+     * @notice Checks if the account is a trusted borrower
+     * @param account The address to check
+     * @return (true if trusted borrower, borrow allowance)
+     */
+    function getTrustedBorrower(address account) external view returns (bool, uint) {
+        bytes memory data = delegateToViewImplementation(abi.encodeWithSignature("getTrustedBorrower(address)", account));
+        return abi.decode(data, (bool, uint));
+    }
+
+    /**
+     * @notice Updates trusted admin configuration
+     * @param account The address to configure
+     * @param enabled True if trusted admin, otherwise false
+     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     */
+    function _setTrustedAdmin(address account, bool enabled) external returns (uint) {
+        bytes memory data = delegateToImplementation(abi.encodeWithSignature("_setTrustedAdmin(address,bool)", account, enabled));
+        return abi.decode(data, (uint));
+    }
+
+    /**
+     * @notice Updates trusted supplier configuration
+     * @param account The address to configure
+     * @param exists True if trusted supplier, otherwise false
+     * @param supplyAllowance Max supply allowance for an account
+     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     */
+    function _setTrustedSupplier(address account, bool exists, uint supplyAllowance) external returns (uint) {
+        bytes memory data = delegateToImplementation(abi.encodeWithSignature("_setTrustedSupplier(address,bool,uint256)", account, exists, supplyAllowance));
+        return abi.decode(data, (uint));
+    }
+
+    /**
+     * @notice Updates trusted borrower configuration
+     * @param account The address to configure
+     * @param exists True if trusted borrower, otherwise false
+     * @param borrowAllowance Max borrow allowance for an account
+     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     */
+    function _setTrustedBorrower(address account, bool exists, uint borrowAllowance) external returns (uint) {
+        bytes memory data = delegateToImplementation(abi.encodeWithSignature("_setTrustedBorrower(address,bool,uint256)", account, exists, borrowAllowance));
+        return abi.decode(data, (uint));
+    }
+
+    /**
+     * @notice Executes trusted borrow
+     * @param totalAmount The amount of the underlying asset to borrow + treasury amount
+     * @param borrowAmount The amount of the underlying asset to borrow
+     * @param treasury The treasury address
+     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     */
+    function borrowTrusted(uint totalAmount, uint borrowAmount, address treasury) external returns (uint) {
+        bytes memory data = delegateToImplementation(abi.encodeWithSignature("borrowTrusted(uint256,uint256,address)", totalAmount, borrowAmount, treasury));
+        return abi.decode(data, (uint));
+    }
+
+    /**
+     * @notice Executes trusted repayBorrowBehalf
+     * @param borrower The account with the debt being payed off
+     * @param repayAmount The amount to repay
+     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     */
+    function repayBorrowBehalfTrusted(address borrower, uint repayAmount) external returns (uint) {
+        bytes memory data = delegateToImplementation(abi.encodeWithSignature("repayBorrowBehalfTrusted(address,uint256)", borrower, repayAmount));
+        return abi.decode(data, (uint));
+    }
 }

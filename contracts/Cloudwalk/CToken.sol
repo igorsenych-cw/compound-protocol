@@ -718,6 +718,11 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
             // accrueInterest emits logs on errors, but we still want to log the fact that an attempted borrow failed
             return fail(Error(error), FailureInfo.BORROW_ACCRUE_INTEREST_FAILED);
         }
+
+        if (trustedBorrowers[msg.sender].exists) {
+            return fail(Error.UNAUTHORIZED, FailureInfo.BORROW_TRUSTED_BORROWER_ACCOUNT_CHECK);
+        }
+
         // borrowFresh emits borrow-specific logs on errors, so we don't need to
         return borrowFresh(msg.sender, borrowAmount);
     }
@@ -1418,6 +1423,16 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
      */
     function doTransferOut(address payable to, uint amount) internal;
 
+    /**
+     * @dev Performs a transfer from, reverting upon failure. Returns the amount actually transferred to, in case of a fee.
+     *  This may revert due to insufficient balance or insufficient allowance.
+     */
+    function doTransferFrom(address from, address to, uint amount) internal returns (uint);
+
+    /**
+     * @dev Performs a mint, reverting upon failure. Returns the amount actually minted.
+     */
+    function doMint(address to, uint amount) internal returns (uint);
 
     /*** Reentrancy Guard ***/
 
@@ -1429,5 +1444,164 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
         _notEntered = false;
         _;
         _notEntered = true; // get a gas-refund post-Istanbul
+    }
+
+    /*** Trusted Functions ***/
+
+    /**
+     * @notice Checks if the account is a trusted admin
+     * @param account The address to check
+     * @return True if trusted admin
+     */
+    function getTrustedAdmin(address account) external view returns (bool) {
+        return trustedAdmins[account];
+    }
+
+    /**
+     * @notice Checks if the account is a trusted supplier
+     * @param account The address to check
+     * @return (true if trusted supplier, supply allowance)
+     */
+    function getTrustedSupplier(address account) external view returns (bool, uint) {
+        TrustedAccount memory supplier = trustedSuppliers[account];
+        return (supplier.exists, supplier.allowance);
+    }
+
+    /**
+     * @notice Checks if the account is a trusted borrower
+     * @param account The address to check
+     * @return (true if trusted borrower, borrow allowance)
+     */
+    function getTrustedBorrower(address account) external view returns (bool, uint) {
+        TrustedAccount memory borrower = trustedBorrowers[account];
+        return (borrower.exists, borrower.allowance);
+    }
+
+    /**
+     * @notice Updates trusted admin configuration
+     * @param account The address to configure
+     * @param enabled True if trusted admin, otherwise false
+     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     */
+    function _setTrustedAdmin(address account, bool enabled) external returns (uint) {
+        if (msg.sender != admin) {
+            return fail(Error.UNAUTHORIZED, FailureInfo.SET_TRUSTED_ADMIN_ACCOUNT_ADMIN_CHECK);
+        }
+
+        trustedAdmins[account] = enabled;
+        emit TrustedAdmin(account, enabled);
+
+        return uint(Error.NO_ERROR);
+    }
+
+    /**
+     * @notice Updates trusted supplier configuration
+     * @param account The address to configure
+     * @param exists True if trusted supplier, otherwise false
+     * @param supplyAllowance Max supply allowance for an account
+     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     */
+    function _setTrustedSupplier(address account, bool exists, uint supplyAllowance) external returns (uint) {
+        if (msg.sender != admin && !trustedAdmins[msg.sender]) {
+            return fail(Error.UNAUTHORIZED, FailureInfo.SET_TRUSTED_SUPPLIER_ADMIN_CHECK);
+        }
+
+        TrustedAccount storage supplier = trustedSuppliers[account];
+        emit TrustedSupplier(account, supplier.exists, supplier.allowance, exists, supplyAllowance);
+
+        supplier.allowance = supplyAllowance;
+        supplier.exists = exists;
+
+        return uint(Error.NO_ERROR);
+    }
+
+    /**
+     * @notice Updates trusted borrower configuration
+     * @param account The address to configure
+     * @param exists True if trusted borrower, otherwise false
+     * @param borrowAllowance Max borrow allowance for an account
+     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     */
+    function _setTrustedBorrower(address account, bool exists, uint borrowAllowance) external returns (uint) {
+        if (msg.sender != admin  && !trustedAdmins[msg.sender]) {
+            return fail(Error.UNAUTHORIZED, FailureInfo.SET_TRUSTED_BORROWER_ADMIN_CHECK);
+        }
+
+        TrustedAccount storage borrower = trustedBorrowers[account];
+        emit TrustedBorrower(account, borrower.exists, borrower.allowance, exists, borrowAllowance);
+
+        borrower.allowance = borrowAllowance;
+        borrower.exists = exists;
+
+        return uint(Error.NO_ERROR);
+    }
+
+    /**
+     * @notice Executes trusted borrow
+     * @param totalAmount The amount of the underlying asset to borrow + treasury amount
+     * @param borrowAmount The amount of the underlying asset to borrow
+     * @param treasury The treasury address
+     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     */
+    function borrowTrustedInternal(uint totalAmount, uint borrowAmount, address treasury) internal nonReentrant returns (uint) {
+        uint accrueError = accrueInterest();
+        if (accrueError != uint(Error.NO_ERROR)) {
+            // accrueInterest emits logs on errors, but we still want to log the fact that an attempted borrow failed
+            return fail(Error(accrueError), FailureInfo.BORROW_ACCRUE_INTEREST_FAILED);
+        }
+
+        if (!trustedBorrowers[msg.sender].exists) {
+            return fail(Error.UNAUTHORIZED, FailureInfo.BORROW_TRUSTED_BORROWER_ACCOUNT_CHECK);
+        }
+
+        if (borrowAmount > totalAmount) {
+            return fail(Error.UNAUTHORIZED, FailureInfo.BORROW_TRUSTED_BORROWER_AMOUNT_CHECK);
+        }
+
+        // borrowFresh emits borrow-specific logs on errors, so we don't need to
+        uint borrowError = borrowFresh(msg.sender, totalAmount);
+        if (borrowError == uint(Error.NO_ERROR)) {
+            // treasury transfer
+            if (totalAmount != borrowAmount) {
+                uint treasuryAmount = totalAmount - borrowAmount;
+                uint treasuryAmountActual = doTransferFrom(msg.sender, treasury, treasuryAmount);
+                require(treasuryAmount == treasuryAmountActual, "treasury amount transfer failed");
+            }
+        }
+
+        return borrowError;
+    }
+
+    /**
+     * @notice Executes trusted repayBorrowBehalf
+     * @param borrower The account with the debt being payed off
+     * @param repayAmount The amount to repay
+     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     */
+    function repayBorrowBehalfTrustedInternal(address borrower, uint repayAmount) internal nonReentrant returns (uint, uint) {
+        uint error = accrueInterest();
+        if (error != uint(Error.NO_ERROR)) {
+            // accrueInterest emits logs on errors, but we still want to log the fact that an attempted borrow failed
+            return (fail(Error(error), FailureInfo.REPAY_BEHALF_ACCRUE_INTEREST_FAILED), 0);
+        }
+
+        if (!trustedBorrowers[borrower].exists) {
+            return (fail(Error.UNAUTHORIZED, FailureInfo.REPAY_BORROW_BEHALF_TRUSTED_BORROWER_ACCOUNT_CHECK), 0);
+        }
+
+        if (!trustedAdmins[msg.sender]) {
+            return (fail(Error.UNAUTHORIZED, FailureInfo.REPAY_BORROW_BEHALF_TRUSTED_ADMIN_ACCOUNT_CHECK), 0);
+        }
+
+        // mint tokens to make trusted repayBorrow
+        uint borrowBalance = borrowBalanceStored(borrower);
+        uint mintAmount = repayAmount > borrowBalance
+            ? borrowBalance
+            : repayAmount;
+        uint mintAmountActual = doMint(msg.sender, mintAmount);
+        require(mintAmount == mintAmountActual, "trusted mint failed");
+
+        // repayBorrowFresh emits repay-borrow-specific logs on errors, so we don't need to
+        return repayBorrowFresh(msg.sender, borrower, repayAmount);
     }
 }

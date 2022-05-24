@@ -48,6 +48,12 @@ contract Comptroller is ComptrollerV4Storage, ComptrollerInterface, ComptrollerE
     /// @notice Emitted when borrow cap guardian is changed
     event NewBorrowCapGuardian(address oldBorrowCapGuardian, address newBorrowCapGuardian);
 
+    /// @notice Emitted when market.onlyTrustedSuppliers config is changed
+    event OnlyTrustedSuppliers(CToken indexed cToken, bool state);
+
+    /// @notice Emitted when market.onlyTrustedBorrowers config is changed
+    event OnlyTrustedBorrowers(CToken indexed cToken, bool state);
+
     // closeFactorMantissa must be strictly greater than this value
     uint internal constant closeFactorMinMantissa = 0.05e18; // 0.05
 
@@ -55,7 +61,7 @@ contract Comptroller is ComptrollerV4Storage, ComptrollerInterface, ComptrollerE
     uint internal constant closeFactorMaxMantissa = 0.9e18; // 0.9
 
     // No collateralFactorMantissa may exceed this value
-    uint internal constant collateralFactorMaxMantissa = 0.9e18; // 0.9
+    uint internal constant collateralFactorMaxMantissa = 1.0e18; // 1.0
 
     constructor() public {
         admin = msg.sender;
@@ -214,6 +220,19 @@ contract Comptroller is ComptrollerV4Storage, ComptrollerInterface, ComptrollerE
             return uint(Error.MARKET_NOT_LISTED);
         }
 
+        (bool exists, ) = CToken(cToken).getTrustedSupplier(minter);
+        if (exists) {
+            (Error err, , uint shortfall) = getTrustedSupplierLiquidityInternal(minter, CToken(cToken), mintAmount);
+            if (err != Error.NO_ERROR) {
+                return uint(err);
+            }
+            if (shortfall > 0) {
+                return uint(Error.TRUSTED_SUPPLY_ALLOWANCE_OVERFLOW);
+            }
+        } else if (markets[cToken].onlyTrustedSuppliers) {
+            return uint(Error.UNTRUSTED_SUPPLIER_ACCOUNT);
+        }
+
         return uint(Error.NO_ERROR);
     }
 
@@ -335,12 +354,25 @@ contract Comptroller is ComptrollerV4Storage, ComptrollerInterface, ComptrollerE
             require(nextTotalBorrows < borrowCap, "market borrow cap reached");
         }
 
-        (Error err, , uint shortfall) = getHypotheticalAccountLiquidityInternal(borrower, CToken(cToken), 0, borrowAmount);
-        if (err != Error.NO_ERROR) {
-            return uint(err);
-        }
-        if (shortfall > 0) {
-            return uint(Error.INSUFFICIENT_LIQUIDITY);
+        (bool exists, ) = CToken(cToken).getTrustedBorrower(borrower);
+        if (exists) {
+            (Error err, , uint shortfall) = getTrustedBorrowerLiquidityInternal(borrower, CToken(cToken), borrowAmount);
+            if (err != Error.NO_ERROR) {
+                return uint(err);
+            }
+            if (shortfall > 0) {
+                return uint(Error.TRUSTED_BORROW_ALLOWANCE_OVERFLOW);
+            }
+        } else if (markets[cToken].onlyTrustedBorrowers) {
+            return uint(Error.UNTRUSTED_BORROWER_ACCOUNT);
+        } else {
+            (Error err, , uint shortfall) = getHypotheticalAccountLiquidityInternal(borrower, CToken(cToken), 0, borrowAmount);
+            if (err != Error.NO_ERROR) {
+                return uint(err);
+            }
+            if (shortfall > 0) {
+                return uint(Error.INSUFFICIENT_LIQUIDITY);
+            }
         }
 
         return uint(Error.NO_ERROR);
@@ -883,7 +915,7 @@ contract Comptroller is ComptrollerV4Storage, ComptrollerInterface, ComptrollerE
 
         cToken.isCToken(); // Sanity check to make sure its really a CToken
 
-        markets[address(cToken)] = Market({isListed: true, collateralFactorMantissa: 0});
+        markets[address(cToken)] = Market({isListed: true, onlyTrustedSuppliers: true, onlyTrustedBorrowers: true, collateralFactorMantissa: 0});
 
         _addMarketInternal(address(cToken));
 
@@ -1033,5 +1065,136 @@ contract Comptroller is ComptrollerV4Storage, ComptrollerInterface, ComptrollerE
 
     function getBlockNumber() public view returns (uint) {
         return block.number;
+    }
+
+    /*** Trusted Functions ***/
+
+    /**
+     * @notice Determine what the trusted account liquidity would be if the given amount borrowed
+     * @param cToken The market to borrow from
+     * @param account The account to determine liquidity for
+     * @param borrowAmount The amount of underlying token to borrow
+     * @dev Note that liquidity and shortfall are returned as an amount of underlying token
+     * @return (possible error code,
+                account liquidity in excess of allowance,
+     *          account shortfall below allowance)
+     */
+    function getTrustedBorrowerLiquidity(address account, address cToken, uint borrowAmount) external view returns (uint, uint, uint) {
+        (Error err, uint liquidity, uint shortfall) = getTrustedBorrowerLiquidityInternal(account, CToken(cToken), borrowAmount);
+        return (uint(err), liquidity, shortfall);
+    }
+
+    /**
+     * @notice Determine what the trusted account liquidity would be if the given amount borrowed
+     * @param cToken The market to borrow from
+     * @param account The account to determine liquidity for
+     * @param borrowAmount The amount of underlying token to borrow
+     * @dev Note that liquidity and shortfall are returned as an amount of underlying token
+     * @return (possible error code,
+                account liquidity in excess of allowance,
+     *          account shortfall below allowance)
+     */
+    function getTrustedBorrowerLiquidityInternal(address account, CToken cToken, uint borrowAmount) internal view returns (Error, uint, uint) {
+        uint oErr;
+        uint borrowBalance;
+
+        // Read trusted borrower data
+        (bool exists, uint borrowAllowance) = cToken.getTrustedBorrower(account);
+        if (!exists) {
+            return (Error.UNTRUSTED_BORROWER_ACCOUNT, 0, 0);
+        }
+
+        // Read borrow balance
+        (oErr, , borrowBalance, ) = cToken.getAccountSnapshot(account);
+        if (oErr != 0) {
+            return (Error.SNAPSHOT_ERROR, 0, 0);
+        }
+
+        borrowBalance = add_(borrowBalance, borrowAmount);
+
+        // These are safe, as the underflow condition is checked first
+        if (borrowAllowance > borrowBalance) {
+            return (Error.NO_ERROR, borrowAllowance - borrowBalance, 0);
+        } else {
+            return (Error.NO_ERROR, 0, borrowBalance - borrowAllowance);
+        }
+    }
+
+    /**
+     * @notice Determine what the trusted account liquidity would be if the given amount supplied
+     * @param cToken The market to supply in
+     * @param account The account to determine liquidity for
+     * @param supplyAmount The amount of underlying token to supply
+     * @dev Note that liquidity and shortfall are returned as an amount of underlying token
+     * @return (possible error code,
+                account liquidity in excess of allowance,
+     *          account shortfall below allowance)
+     */
+    function getTrustedSupplierLiquidity(address account, address cToken, uint supplyAmount) external view returns (uint, uint, uint) {
+        (Error err, uint liquidity, uint shortfall) = getTrustedSupplierLiquidityInternal(account, CToken(cToken), supplyAmount);
+        return (uint(err), liquidity, shortfall);
+    }
+
+    /**
+     * @notice Determine what the account liquidity would be if the given amount borrowed
+     * @param cToken The market to borrow from
+     * @param account The account to determine liquidity for
+     * @param supplyAmount The amount of underlying to supply
+     * @dev Note that liquidity and shortfall are returned as an amount of underlying token
+     * @return (possible error code,
+                account liquidity in excess of allowance,
+     *          account shortfall below allowance)
+     */
+    function getTrustedSupplierLiquidityInternal(address account, CToken cToken, uint supplyAmount) internal view returns (Error, uint, uint) {
+        uint oErr;
+        uint supplyBalance;
+        uint exchangeRateMantissa;
+
+        // Read trusted supplier data
+        (bool exists, uint supplyAllowance) = cToken.getTrustedSupplier(account);
+        if (!exists) {
+            return (Error.UNTRUSTED_SUPPLIER_ACCOUNT, 0, 0);
+        }
+
+        // Read cToken balance
+        (oErr, supplyBalance, , exchangeRateMantissa) = cToken.getAccountSnapshot(account);
+        if (oErr != 0) {
+            return (Error.SNAPSHOT_ERROR, 0, 0);
+        }
+
+        supplyBalance = mul_ScalarTruncateAddUInt(Exp({mantissa: exchangeRateMantissa}), supplyBalance, supplyAmount);
+
+        // These are safe, as the underflow condition is checked first
+        if (supplyAllowance > supplyBalance) {
+            return (Error.NO_ERROR, supplyAllowance - supplyBalance, 0);
+        } else {
+            return (Error.NO_ERROR, 0, supplyBalance - supplyAllowance);
+        }
+    }
+
+    /**
+     * @notice Updates the onlyTrustedSuppliers configuration
+     * @param state The new state of onlyTrustedSuppliers configuration
+     */
+    function _setOnlyTrustedSuppliers(CToken cToken, bool state) public returns (bool) {
+        require(markets[address(cToken)].isListed, "market is not listed");
+        require(msg.sender == admin, "caller is not admin");
+
+        markets[address(cToken)].onlyTrustedSuppliers = state;
+        emit OnlyTrustedSuppliers(cToken, state);
+        return state;
+    }
+
+    /**
+     * @notice Updates the onlyTrustedBorrowers configuration
+     * @param state The new state of onlyTrustedBorrowers configuration
+     */
+    function _setOnlyTrustedBorrowers(CToken cToken, bool state) public returns (bool) {
+        require(markets[address(cToken)].isListed, "market is not listed");
+        require(msg.sender == admin, "caller is not admin");
+
+        markets[address(cToken)].onlyTrustedBorrowers = state;
+        emit OnlyTrustedBorrowers(cToken, state);
+        return state;
     }
 }

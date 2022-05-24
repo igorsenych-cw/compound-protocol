@@ -1,6 +1,7 @@
 pragma solidity ^0.5.16;
 
 import "./CToken.sol";
+import "./EIP20MintableInterface.sol";
 
 /**
  * @title Compound's CErc20 Contract
@@ -204,5 +205,82 @@ contract CErc20 is CToken, CErc20Interface {
                 }
         }
         require(success, "TOKEN_TRANSFER_OUT_FAILED");
+    }
+
+    /**
+     * @dev Similar to EIP20 transfer, except it handles a False result from `transferFrom` and reverts in that case.
+     *      This will revert due to insufficient balance or insufficient allowance.
+     *      This function returns the actual amount transferred to,
+     *      which may be less than `amount` if there is a fee attached to the transfer.
+     *
+     *      Note: This wrapper safely handles non-standard ERC-20 tokens that do not return a value.
+     *            See here: https://medium.com/coinmonks/missing-return-value-bug-at-least-130-tokens-affected-d67bf08521ca
+     */
+    function doTransferFrom(address from, address to, uint amount) internal returns (uint) {
+        EIP20NonStandardInterface token = EIP20NonStandardInterface(underlying);
+        uint balanceBefore = EIP20Interface(underlying).balanceOf(to);
+        token.transferFrom(from, to, amount);
+
+        bool success;
+        assembly {
+            switch returndatasize()
+                case 0 {                       // This is a non-standard ERC-20
+                    success := not(0)          // set success to true
+                }
+                case 32 {                      // This is a compliant ERC-20
+                    returndatacopy(0, 0, 32)
+                    success := mload(0)        // Set `success = returndata` of external call
+                }
+                default {                      // This is an excessively non-compliant ERC-20, revert.
+                    revert(0, 0)
+                }
+        }
+        require(success, "TOKEN_TRANSFER_FROM_FAILED");
+
+        // Calculate the amount that was *actually* transferred
+        uint balanceAfter = EIP20Interface(underlying).balanceOf(to);
+        require(balanceAfter >= balanceBefore, "TOKEN_TRANSFER_FROM_OVERFLOW");
+        return balanceAfter - balanceBefore;   // underflow already checked above, just subtract
+    }
+
+    /**
+     * @dev Executes `mint` and handles a False result and reverts in that case.
+     *      This function returns the actual amount minted.
+     */
+    function doMint(address to, uint amount) internal returns (uint) {
+        EIP20MintableInterface token = EIP20MintableInterface(underlying);
+        uint balanceBefore = EIP20Interface(underlying).balanceOf(to);
+
+        bool success = token.mint(to, amount);
+        require(success, "TOKEN_MINT_FAILED");
+
+        // Calculate the amount that was *actually* minted
+        uint balanceAfter = EIP20Interface(underlying).balanceOf(to);
+        require(balanceAfter >= balanceBefore, "TOKEN_MINT_OVERFLOW");
+        return balanceAfter - balanceBefore; // underflow already checked above, just subtract
+    }
+
+    /*** Trusted Functions ***/
+
+    /**
+      * @notice Trusted sender borrows assets from the protocol to their own address
+      * @param totalAmount The amount of the underlying asset to borrow + treasury amount
+      * @param borrowAmount The amount of the underlying asset to borrow
+      * @param treasury The treasury address
+      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+      */
+    function borrowTrusted(uint totalAmount, uint borrowAmount, address treasury) external returns (uint) {
+        return borrowTrustedInternal(totalAmount, borrowAmount, treasury);
+    }
+
+    /**
+     * @notice Trusted sender repays a borrow belonging to borrower
+     * @param borrower the account with the debt being payed off
+     * @param repayAmount The amount to repay
+     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     */
+    function repayBorrowBehalfTrusted(address borrower, uint repayAmount) external returns (uint) {
+        (uint err,) = repayBorrowBehalfTrustedInternal(borrower, repayAmount);
+        return err;
     }
 }

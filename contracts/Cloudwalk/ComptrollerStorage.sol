@@ -59,6 +59,12 @@ contract ComptrollerV2Storage is ComptrollerV1Storage {
         /// @notice Whether or not this market is listed
         bool isListed;
 
+        /// @notice Determines if only trusted suppliers allowed
+        bool onlyTrustedSuppliers;
+
+        /// @notice Determines if only trusted borrowers allowed
+        bool onlyTrustedBorrowers;
+
         /**
          * @notice Multiplier representing the most one can borrow against their collateral in this market.
          *  For instance, 0.9 to allow borrowing 90% of collateral value.
