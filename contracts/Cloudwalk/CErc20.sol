@@ -1,7 +1,7 @@
 pragma solidity ^0.5.16;
 
 import "./CToken.sol";
-import "./EIP20MintableInterface.sol";
+import "./IERC20Mintable.sol";
 
 /**
  * @title Compound's CErc20 Contract
@@ -248,7 +248,7 @@ contract CErc20 is CToken, CErc20Interface {
      *      This function returns the actual amount minted.
      */
     function doMint(address to, uint amount) internal returns (uint) {
-        EIP20MintableInterface token = EIP20MintableInterface(underlying);
+        IERC20Mintable token = IERC20Mintable(underlying);
         uint balanceBefore = EIP20Interface(underlying).balanceOf(to);
 
         bool success = token.mint(to, amount);
