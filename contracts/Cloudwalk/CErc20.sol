@@ -2,6 +2,7 @@ pragma solidity ^0.5.16;
 
 import "./CToken.sol";
 import "./IERC20Mintable.sol";
+import "./IERC20Wrapper.sol";
 
 /**
  * @title Compound's CErc20 Contract
@@ -216,10 +217,10 @@ contract CErc20 is CToken, CErc20Interface {
      *      Note: This wrapper safely handles non-standard ERC-20 tokens that do not return a value.
      *            See here: https://medium.com/coinmonks/missing-return-value-bug-at-least-130-tokens-affected-d67bf08521ca
      */
-    function doTransferFrom(address from, address to, uint amount) internal returns (uint) {
-        EIP20NonStandardInterface token = EIP20NonStandardInterface(underlying);
-        uint balanceBefore = EIP20Interface(underlying).balanceOf(to);
-        token.transferFrom(from, to, amount);
+    function doWrappedTransferFrom(address from, address to, uint amount) internal returns (uint) {
+        address token = getWrappedUnderlying();
+        uint balanceBefore = EIP20Interface(token).balanceOf(to);
+        EIP20NonStandardInterface(token).transferFrom(from, to, amount);
 
         bool success;
         assembly {
@@ -238,7 +239,7 @@ contract CErc20 is CToken, CErc20Interface {
         require(success, "TOKEN_TRANSFER_FROM_FAILED");
 
         // Calculate the amount that was *actually* transferred
-        uint balanceAfter = EIP20Interface(underlying).balanceOf(to);
+        uint balanceAfter = EIP20Interface(token).balanceOf(to);
         require(balanceAfter >= balanceBefore, "TOKEN_TRANSFER_FROM_OVERFLOW");
         return balanceAfter - balanceBefore;   // underflow already checked above, just subtract
     }
@@ -247,15 +248,15 @@ contract CErc20 is CToken, CErc20Interface {
      * @dev Executes `mint` and handles a False result and reverts in that case.
      *      This function returns the actual amount minted.
      */
-    function doMint(address to, uint amount) internal returns (uint) {
-        IERC20Mintable token = IERC20Mintable(underlying);
-        uint balanceBefore = EIP20Interface(underlying).balanceOf(to);
+    function doWrappedMint(address to, uint amount) internal returns (uint) {
+        address token = getWrappedUnderlying();
+        uint balanceBefore = EIP20Interface(token).balanceOf(to);
 
-        bool success = token.mint(to, amount);
+        bool success = IERC20Mintable(token).mint(to, amount);
         require(success, "TOKEN_MINT_FAILED");
 
         // Calculate the amount that was *actually* minted
-        uint balanceAfter = EIP20Interface(underlying).balanceOf(to);
+        uint balanceAfter = EIP20Interface(token).balanceOf(to);
         require(balanceAfter >= balanceBefore, "TOKEN_MINT_OVERFLOW");
         return balanceAfter - balanceBefore; // underflow already checked above, just subtract
     }
@@ -282,5 +283,43 @@ contract CErc20 is CToken, CErc20Interface {
     function repayBorrowBehalfTrusted(address borrower, uint repayAmount) external returns (uint) {
         (uint err,) = repayBorrowBehalfTrustedInternal(borrower, repayAmount);
         return err;
+    }
+
+    /*** Wrapper Functions ***/
+
+    /**
+     * @dev Checks if the underlying token implements IERC20Wrapper interface.
+     */
+    function isIERC20Wrapper() internal view returns (bool) {
+        (bool success, bytes memory result) = underlying
+            .staticcall(abi.encodeWithSignature("isIERC20Wrapper()"));
+        return success ? abi.decode(result, (bool)) : false;
+    }
+
+    /**
+     * @dev Returns wrapped-underlying or underlying token address.
+     */
+    function getWrappedUnderlying() internal returns (address) {
+        return isIERC20Wrapper()
+            ? IERC20Wrapper(underlying).underlying()
+            : underlying;
+    }
+
+    /**
+     * @dev Executes a wrap of underlying token and handles a False result and reverts in that case.
+     */
+    function doWrapUnderying(address account, uint amount) internal {
+        if (isIERC20Wrapper()) {
+            require(IERC20Wrapper(underlying).wrapFor(account, amount), "TOKEN_WRAP_FAILED");
+        }
+    }
+
+    /**
+     * @dev Executes a unwrap of underlying token and handles a False result and reverts in that case.
+     */
+    function doUnwrapUnderying(address account, uint amount) internal {
+        if (isIERC20Wrapper()) {
+            require(IERC20Wrapper(underlying).unwrapFor(account, amount), "TOKEN_UNWRAP_FAILED");
+        }
     }
 }

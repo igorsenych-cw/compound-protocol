@@ -473,8 +473,15 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
             // accrueInterest emits logs on errors, but we still want to log the fact that an attempted borrow failed
             return (fail(Error(error), FailureInfo.MINT_ACCRUE_INTEREST_FAILED), 0);
         }
+
+        // try to wrap underlying token
+        doWrapUnderying(msg.sender, mintAmount);
+
         // mintFresh emits the actual Mint event if successful and logs on errors, so we don't need to
-        return mintFresh(msg.sender, mintAmount);
+        uint actualMintAmount;
+        (error, actualMintAmount) = mintFresh(msg.sender, mintAmount);
+        require(error == uint(Error.NO_ERROR), "mint fresh failed");
+        return (error, actualMintAmount);
     }
 
     struct MintLocalVars {
@@ -574,7 +581,16 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
             return fail(Error(error), FailureInfo.REDEEM_ACCRUE_INTEREST_FAILED);
         }
         // redeemFresh emits redeem-specific logs on errors, so we don't need to
-        return redeemFresh(msg.sender, redeemTokens, 0);
+        uint actualRedeemAmount;
+        (error, actualRedeemAmount) = redeemFresh(msg.sender, redeemTokens, 0);
+        if (error != uint(Error.NO_ERROR)) {
+            return error;
+        }
+
+        // try to unwrap underlying token
+        doUnwrapUnderying(msg.sender, actualRedeemAmount);
+
+        return uint(Error.NO_ERROR);
     }
 
     /**
@@ -590,7 +606,16 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
             return fail(Error(error), FailureInfo.REDEEM_ACCRUE_INTEREST_FAILED);
         }
         // redeemFresh emits redeem-specific logs on errors, so we don't need to
-        return redeemFresh(msg.sender, 0, redeemAmount);
+        uint actualRedeemAmount;
+        (error, actualRedeemAmount) = redeemFresh(msg.sender, 0, redeemAmount);
+        if (error != uint(Error.NO_ERROR)) {
+            return error;
+        }
+
+        // try to unwrap underlying token
+        doUnwrapUnderying(msg.sender, actualRedeemAmount);
+
+        return uint(Error.NO_ERROR);
     }
 
     struct RedeemLocalVars {
@@ -609,9 +634,9 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
      * @param redeemer The address of the account which is redeeming the tokens
      * @param redeemTokensIn The number of cTokens to redeem into underlying (only one of redeemTokensIn or redeemAmountIn may be non-zero)
      * @param redeemAmountIn The number of underlying tokens to receive from redeeming cTokens (only one of redeemTokensIn or redeemAmountIn may be non-zero)
-     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
+     * @return (uint, uint) An error code (0=success, otherwise a failure, see ErrorReporter.sol), and the actual redeem amount.
      */
-    function redeemFresh(address payable redeemer, uint redeemTokensIn, uint redeemAmountIn) internal returns (uint) {
+    function redeemFresh(address payable redeemer, uint redeemTokensIn, uint redeemAmountIn) internal returns (uint, uint) {
         require(redeemTokensIn == 0 || redeemAmountIn == 0, "one of redeemTokensIn or redeemAmountIn must be zero");
 
         RedeemLocalVars memory vars;
@@ -619,7 +644,7 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
         /* exchangeRate = invoke Exchange Rate Stored() */
         (vars.mathErr, vars.exchangeRateMantissa) = exchangeRateStoredInternal();
         if (vars.mathErr != MathError.NO_ERROR) {
-            return failOpaque(Error.MATH_ERROR, FailureInfo.REDEEM_EXCHANGE_RATE_READ_FAILED, uint(vars.mathErr));
+            return (failOpaque(Error.MATH_ERROR, FailureInfo.REDEEM_EXCHANGE_RATE_READ_FAILED, uint(vars.mathErr)), 0);
         }
 
         /* If redeemTokensIn > 0: */
@@ -633,7 +658,7 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
 
             (vars.mathErr, vars.redeemAmount) = mulScalarTruncate(Exp({mantissa: vars.exchangeRateMantissa}), redeemTokensIn);
             if (vars.mathErr != MathError.NO_ERROR) {
-                return failOpaque(Error.MATH_ERROR, FailureInfo.REDEEM_EXCHANGE_TOKENS_CALCULATION_FAILED, uint(vars.mathErr));
+                return (failOpaque(Error.MATH_ERROR, FailureInfo.REDEEM_EXCHANGE_TOKENS_CALCULATION_FAILED, uint(vars.mathErr)), 0);
             }
         } else {
             /*
@@ -644,7 +669,7 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
 
             (vars.mathErr, vars.redeemTokens) = divScalarByExpTruncate(redeemAmountIn, Exp({mantissa: vars.exchangeRateMantissa}));
             if (vars.mathErr != MathError.NO_ERROR) {
-                return failOpaque(Error.MATH_ERROR, FailureInfo.REDEEM_EXCHANGE_AMOUNT_CALCULATION_FAILED, uint(vars.mathErr));
+                return (failOpaque(Error.MATH_ERROR, FailureInfo.REDEEM_EXCHANGE_AMOUNT_CALCULATION_FAILED, uint(vars.mathErr)), 0);
             }
 
             vars.redeemAmount = redeemAmountIn;
@@ -653,12 +678,12 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
         /* Fail if redeem not allowed */
         uint allowed = comptroller.redeemAllowed(address(this), redeemer, vars.redeemTokens);
         if (allowed != 0) {
-            return failOpaque(Error.COMPTROLLER_REJECTION, FailureInfo.REDEEM_COMPTROLLER_REJECTION, allowed);
+            return (failOpaque(Error.COMPTROLLER_REJECTION, FailureInfo.REDEEM_COMPTROLLER_REJECTION, allowed), 0);
         }
 
         /* Verify market's block number equals current block number */
         if (accrualBlockNumber != getBlockNumber()) {
-            return fail(Error.MARKET_NOT_FRESH, FailureInfo.REDEEM_FRESHNESS_CHECK);
+            return (fail(Error.MARKET_NOT_FRESH, FailureInfo.REDEEM_FRESHNESS_CHECK), 0);
         }
 
         /*
@@ -668,17 +693,17 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
          */
         (vars.mathErr, vars.totalSupplyNew) = subUInt(totalSupply, vars.redeemTokens);
         if (vars.mathErr != MathError.NO_ERROR) {
-            return failOpaque(Error.MATH_ERROR, FailureInfo.REDEEM_NEW_TOTAL_SUPPLY_CALCULATION_FAILED, uint(vars.mathErr));
+            return (failOpaque(Error.MATH_ERROR, FailureInfo.REDEEM_NEW_TOTAL_SUPPLY_CALCULATION_FAILED, uint(vars.mathErr)), 0);
         }
 
         (vars.mathErr, vars.accountTokensNew) = subUInt(accountTokens[redeemer], vars.redeemTokens);
         if (vars.mathErr != MathError.NO_ERROR) {
-            return failOpaque(Error.MATH_ERROR, FailureInfo.REDEEM_NEW_ACCOUNT_BALANCE_CALCULATION_FAILED, uint(vars.mathErr));
+            return (failOpaque(Error.MATH_ERROR, FailureInfo.REDEEM_NEW_ACCOUNT_BALANCE_CALCULATION_FAILED, uint(vars.mathErr)), 0);
         }
 
         /* Fail gracefully if protocol has insufficient cash */
         if (getCashPrior() < vars.redeemAmount) {
-            return fail(Error.TOKEN_INSUFFICIENT_CASH, FailureInfo.REDEEM_TRANSFER_OUT_NOT_POSSIBLE);
+            return (fail(Error.TOKEN_INSUFFICIENT_CASH, FailureInfo.REDEEM_TRANSFER_OUT_NOT_POSSIBLE), 0);
         }
 
         /////////////////////////
@@ -704,7 +729,7 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
         /* We call the defense hook */
         comptroller.redeemVerify(address(this), redeemer, vars.redeemAmount, vars.redeemTokens);
 
-        return uint(Error.NO_ERROR);
+        return (uint(Error.NO_ERROR), vars.redeemAmount);
     }
 
     /**
@@ -724,7 +749,15 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
         }
 
         // borrowFresh emits borrow-specific logs on errors, so we don't need to
-        return borrowFresh(msg.sender, borrowAmount);
+        error = borrowFresh(msg.sender, borrowAmount);
+        if (error != uint(Error.NO_ERROR)) {
+            return error;
+        }
+
+        // try to unwrap underlying token
+        doUnwrapUnderying(msg.sender, borrowAmount);
+
+        return uint(Error.NO_ERROR);
     }
 
     struct BorrowLocalVars {
@@ -816,8 +849,15 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
             // accrueInterest emits logs on errors, but we still want to log the fact that an attempted borrow failed
             return (fail(Error(error), FailureInfo.REPAY_BORROW_ACCRUE_INTEREST_FAILED), 0);
         }
+
+        // try to wrap underlying token
+        doWrapUnderying(msg.sender, repayAmount);
+
         // repayBorrowFresh emits repay-borrow-specific logs on errors, so we don't need to
-        return repayBorrowFresh(msg.sender, msg.sender, repayAmount);
+        uint actualRepaymentAmount;
+        (error, actualRepaymentAmount) = repayBorrowFresh(msg.sender, msg.sender, repayAmount);
+        require(error == uint(Error.NO_ERROR), "repay borrow fresh failed");
+        return (error, actualRepaymentAmount);
     }
 
     /**
@@ -832,8 +872,15 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
             // accrueInterest emits logs on errors, but we still want to log the fact that an attempted borrow failed
             return (fail(Error(error), FailureInfo.REPAY_BEHALF_ACCRUE_INTEREST_FAILED), 0);
         }
+
+        // try to wrap underlying token
+        doWrapUnderying(msg.sender, repayAmount);
+
         // repayBorrowFresh emits repay-borrow-specific logs on errors, so we don't need to
-        return repayBorrowFresh(msg.sender, borrower, repayAmount);
+        uint actualRepaymentAmount;
+        (error, actualRepaymentAmount) = repayBorrowFresh(msg.sender, borrower, repayAmount);
+        require(error == uint(Error.NO_ERROR), "repay borrow fresh failed");
+        return (error, actualRepaymentAmount);
     }
 
     struct RepayBorrowLocalVars {
@@ -944,8 +991,14 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
             return (fail(Error(error), FailureInfo.LIQUIDATE_ACCRUE_COLLATERAL_INTEREST_FAILED), 0);
         }
 
+        // try to wrap underlying token
+        doWrapUnderying(msg.sender, repayAmount);
+
         // liquidateBorrowFresh emits borrow-specific logs on errors, so we don't need to
-        return liquidateBorrowFresh(msg.sender, borrower, repayAmount, cTokenCollateral);
+        uint actualRepaymentAmount;
+        (error, actualRepaymentAmount) = liquidateBorrowFresh(msg.sender, borrower, repayAmount, cTokenCollateral);
+        require(error == uint(Error.NO_ERROR), "liquidate borrow fresh failed");
+        return (error, actualRepaymentAmount);
     }
 
     /**
@@ -1234,8 +1287,12 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
             return fail(Error(error), FailureInfo.ADD_RESERVES_ACCRUE_INTEREST_FAILED);
         }
 
+        // try to wrap underlying token
+        doWrapUnderying(msg.sender, addAmount);
+
         // _addReservesFresh emits reserve-addition-specific logs on errors, so we don't need to.
         (error, ) = _addReservesFresh(addAmount);
+        require(error == uint(Error.NO_ERROR), "add reserves fresh failed");
         return error;
     }
 
@@ -1297,7 +1354,15 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
             return fail(Error(error), FailureInfo.REDUCE_RESERVES_ACCRUE_INTEREST_FAILED);
         }
         // _reduceReservesFresh emits reserve-reduction-specific logs on errors, so we don't need to.
-        return _reduceReservesFresh(reduceAmount);
+        error = _reduceReservesFresh(reduceAmount);
+        if (error != uint(Error.NO_ERROR)) {
+            return error;
+        }
+
+        // try to unwrap underlying token
+        doUnwrapUnderying(msg.sender, reduceAmount);
+
+        return uint(Error.NO_ERROR);
     }
 
     /**
@@ -1424,15 +1489,16 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
     function doTransferOut(address payable to, uint amount) internal;
 
     /**
-     * @dev Performs a transfer from, reverting upon failure. Returns the amount actually transferred to, in case of a fee.
+     * @dev Performs a wrapped transfer from, reverting upon failure. Returns the amount actually transferred to, in case of a fee.
      *  This may revert due to insufficient balance or insufficient allowance.
      */
-    function doTransferFrom(address from, address to, uint amount) internal returns (uint);
+    function doWrappedTransferFrom(address from, address to, uint amount) internal returns (uint);
 
     /**
-     * @dev Performs a mint, reverting upon failure. Returns the amount actually minted.
+     * @dev Performs a wrapped mint, reverting upon failure. Returns the amount actually minted.
+     *  This may revert due to insufficient mint allowance.
      */
-    function doMint(address to, uint amount) internal returns (uint);
+    function doWrappedMint(address to, uint amount) internal returns (uint);
 
     /*** Reentrancy Guard ***/
 
@@ -1544,10 +1610,10 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
      * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
      */
     function borrowTrustedInternal(uint totalAmount, uint borrowAmount, address treasury) internal nonReentrant returns (uint) {
-        uint accrueError = accrueInterest();
-        if (accrueError != uint(Error.NO_ERROR)) {
+        uint error = accrueInterest();
+        if (error != uint(Error.NO_ERROR)) {
             // accrueInterest emits logs on errors, but we still want to log the fact that an attempted borrow failed
-            return fail(Error(accrueError), FailureInfo.BORROW_ACCRUE_INTEREST_FAILED);
+            return fail(Error(error), FailureInfo.BORROW_ACCRUE_INTEREST_FAILED);
         }
 
         if (!trustedBorrowers[msg.sender].exists) {
@@ -1559,17 +1625,22 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
         }
 
         // borrowFresh emits borrow-specific logs on errors, so we don't need to
-        uint borrowError = borrowFresh(msg.sender, totalAmount);
-        if (borrowError == uint(Error.NO_ERROR)) {
-            // treasury transfer
-            if (totalAmount != borrowAmount) {
-                uint treasuryAmount = totalAmount - borrowAmount;
-                uint treasuryAmountActual = doTransferFrom(msg.sender, treasury, treasuryAmount);
-                require(treasuryAmount == treasuryAmountActual, "treasury amount transfer failed");
-            }
+        error = borrowFresh(msg.sender, totalAmount);
+        if (error != uint(Error.NO_ERROR)) {
+            return error;
         }
 
-        return borrowError;
+        // try to unwrap underlying token
+        doUnwrapUnderying(msg.sender, totalAmount);
+
+        // transfer to the treasury
+        if (totalAmount != borrowAmount) {
+            uint treasuryAmount = totalAmount - borrowAmount; // underflow already checked above
+            uint treasuryAmountActual = doWrappedTransferFrom(msg.sender, treasury, treasuryAmount);
+            require(treasuryAmount == treasuryAmountActual, "transfer to the treasury failed");
+        }
+
+        return uint(Error.NO_ERROR);
     }
 
     /**
@@ -1598,10 +1669,28 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
         uint mintAmount = repayAmount > borrowBalance
             ? borrowBalance
             : repayAmount;
-        uint mintAmountActual = doMint(msg.sender, mintAmount);
+        uint mintAmountActual = doWrappedMint(msg.sender, mintAmount);
         require(mintAmount == mintAmountActual, "trusted mint failed");
 
+        // try to wrap underlying token
+        doWrapUnderying(msg.sender, mintAmount);
+
         // repayBorrowFresh emits repay-borrow-specific logs on errors, so we don't need to
-        return repayBorrowFresh(msg.sender, borrower, repayAmount);
+        uint actualRepaymentAmount;
+        (error, actualRepaymentAmount) = repayBorrowFresh(msg.sender, borrower, repayAmount);
+        require(error == uint(Error.NO_ERROR), "repay borrow fresh failed");
+        return (error, actualRepaymentAmount);
     }
+
+    /*** Wrapper Functions ***/
+
+    /**
+     * @dev Performs a wrap of underlying token if required, reverting upon failure.
+     */
+    function doWrapUnderying(address account, uint amount) internal;
+
+    /**
+     * @dev Performs a unwrap of underlying token if required, reverting upon failure.
+     */
+    function doUnwrapUnderying(address account, uint amount) internal;
 }
