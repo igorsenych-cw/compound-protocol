@@ -1,14 +1,12 @@
-pragma solidity ^0.5.16;
+// SPDX-License-Identifier: BSD-3-Clause
+pragma solidity ^0.8.10;
 
 import "../InterestRateModel.sol";
-import "../SafeMath.sol";
 
 /**
  * @title Transient InterestRateModel implementation
  */
 contract TransientBorrowRateModel is InterestRateModel {
-    using SafeMath for uint256;
-
     event OwnerChanged(address indexed newOwner, address indexed oldOwner);
     event ManagerChanged(address indexed newManager, address indexed oldManager);
     event NewRatePerBlock(uint256 newRatePerBlock, uint256 oldRatePerBlock);
@@ -69,7 +67,7 @@ contract TransientBorrowRateModel is InterestRateModel {
      * @notice Construct an interest rate model
      * @param baseRatePerYear_ The approximate target base APR, as a mantissa (scaled by 1e18)
      */
-    constructor(uint256 baseRatePerYear_) public {
+    constructor(uint256 baseRatePerYear_) {
         owner = msg.sender;
         baseRatePerYear = baseRatePerYear_;
         UpdateRatePerBlock();
@@ -91,7 +89,7 @@ contract TransientBorrowRateModel is InterestRateModel {
         if (borrows == 0) {
             return 0;
         }
-        return borrows.mul(1e18).div(cash.add(borrows).sub(reserves));
+        return borrows * 1e18 / (cash + borrows - reserves);
     }
 
     /**
@@ -105,7 +103,7 @@ contract TransientBorrowRateModel is InterestRateModel {
         uint256 cash,
         uint256 borrows,
         uint256 reserves
-    ) public view returns (uint256) {
+    ) public view override returns (uint256) {
         cash;
         borrows;
         reserves;
@@ -125,14 +123,11 @@ contract TransientBorrowRateModel is InterestRateModel {
         uint256 borrows,
         uint256 reserves,
         uint256 reserveFactorMantissa
-    ) public view returns (uint256) {
-        uint256 oneMinusReserveFactor = uint256(1e18).sub(
-            reserveFactorMantissa
-        );
+    ) public view override returns (uint256) {
+        uint256 oneMinusReserveFactor = 1e18 - reserveFactorMantissa;
         uint256 borrowRate = getBorrowRate(cash, borrows, reserves);
-        uint256 rateToPool = borrowRate.mul(oneMinusReserveFactor).div(1e18);
-        return
-            utilizationRate(cash, borrows, reserves).mul(rateToPool).div(1e18);
+        uint256 rateToPool = borrowRate * oneMinusReserveFactor / 1e18;
+        return utilizationRate(cash, borrows, reserves) * rateToPool / 1e18;
     }
 
     /**
@@ -159,7 +154,10 @@ contract TransientBorrowRateModel is InterestRateModel {
      * @dev Transfers ownership of the contract to a new account (`newOwner`)
      * Can only be called by the current owner
      */
-    function updateBlocksPerYear(uint256 newBlocksPerYear) external onlyManager {
+    function updateBlocksPerYear(uint256 newBlocksPerYear)
+        external
+        onlyManager
+    {
         require(newBlocksPerYear >= blocksPerYearMin, "max out of range");
         require(newBlocksPerYear <= blocksPerYearMax, "min out of range");
         emit NewBlocksPerYear(newBlocksPerYear, blocksPerYear);
@@ -168,7 +166,7 @@ contract TransientBorrowRateModel is InterestRateModel {
     }
 
     function UpdateRatePerBlock() internal {
-        uint256 newBaseRatePerBlock = baseRatePerYear.div(blocksPerYear);
+        uint256 newBaseRatePerBlock = baseRatePerYear / blocksPerYear;
         emit NewRatePerBlock(newBaseRatePerBlock, baseRatePerBlock);
         baseRatePerBlock = newBaseRatePerBlock;
     }

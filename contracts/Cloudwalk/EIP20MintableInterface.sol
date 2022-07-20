@@ -1,4 +1,4 @@
-pragma solidity ^0.5.16;
+pragma solidity ^0.8.10;
 
 /**
  * @title EIP20 mintable interface

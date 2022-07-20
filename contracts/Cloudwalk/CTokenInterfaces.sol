@@ -1,4 +1,5 @@
-pragma solidity ^0.5.16;
+// SPDX-License-Identifier: BSD-3-Clause
+pragma solidity ^0.8.10;
 
 import "./ComptrollerInterface.sol";
 import "../InterestRateModel.sol";
@@ -28,7 +29,6 @@ contract CTokenStorage {
     /**
      * @notice Maximum borrow rate that can ever be applied (.005% / block)
      */
-
     uint internal constant borrowRateMaxMantissa = 0.005e16;
 
     /**
@@ -140,7 +140,7 @@ contract CTokenStorage {
     mapping(address => bool) internal trustedAdmins;
 }
 
-contract CTokenInterface is CTokenStorage {
+abstract contract CTokenInterface is CTokenStorage {
     /**
      * @notice Indicator that this is a CToken contract (for inspection)
      */
@@ -228,11 +228,6 @@ contract CTokenInterface is CTokenStorage {
     event Approval(address indexed owner, address indexed spender, uint amount);
 
     /**
-     * @notice Failure event
-     */
-    event Failure(uint error, uint info, uint detail);
-
-    /**
      * @notice Event emitted when trusted supplier is configured
      */
     event TrustedSupplier(address indexed account, bool oldExists, uint oldAllowance, bool newExists, uint newAllowance);
@@ -250,43 +245,43 @@ contract CTokenInterface is CTokenStorage {
 
     /*** User Interface ***/
 
-    function transfer(address dst, uint amount) external returns (bool);
-    function transferFrom(address src, address dst, uint amount) external returns (bool);
-    function approve(address spender, uint amount) external returns (bool);
-    function allowance(address owner, address spender) external view returns (uint);
-    function balanceOf(address owner) external view returns (uint);
-    function balanceOfUnderlying(address owner) external returns (uint);
-    function getAccountSnapshot(address account) external view returns (uint, uint, uint, uint);
-    function borrowRatePerBlock() external view returns (uint);
-    function supplyRatePerBlock() external view returns (uint);
-    function totalBorrowsCurrent() external returns (uint);
-    function borrowBalanceCurrent(address account) external returns (uint);
-    function borrowBalanceStored(address account) public view returns (uint);
-    function exchangeRateCurrent() public returns (uint);
-    function exchangeRateStored() public view returns (uint);
-    function getCash() external view returns (uint);
-    function accrueInterest() public returns (uint);
-    function seize(address liquidator, address borrower, uint seizeTokens) external returns (uint);
+    function transfer(address dst, uint amount) virtual external returns (bool);
+    function transferFrom(address src, address dst, uint amount) virtual external returns (bool);
+    function approve(address spender, uint amount) virtual external returns (bool);
+    function allowance(address owner, address spender) virtual external view returns (uint);
+    function balanceOf(address owner) virtual external view returns (uint);
+    function balanceOfUnderlying(address owner) virtual external returns (uint);
+    function getAccountSnapshot(address account) virtual external view returns (uint, uint, uint, uint);
+    function borrowRatePerBlock() virtual external view returns (uint);
+    function supplyRatePerBlock() virtual external view returns (uint);
+    function totalBorrowsCurrent() virtual external returns (uint);
+    function borrowBalanceCurrent(address account) virtual external returns (uint);
+    function borrowBalanceStored(address account) virtual external view returns (uint);
+    function exchangeRateCurrent() virtual external returns (uint);
+    function exchangeRateStored() virtual external view returns (uint);
+    function getCash() virtual external view returns (uint);
+    function accrueInterest() virtual external returns (uint);
+    function seize(address liquidator, address borrower, uint seizeTokens) virtual external returns (uint);
 
 
     /*** Admin Functions ***/
 
-    function _setPendingAdmin(address payable newPendingAdmin) external returns (uint);
-    function _acceptAdmin() external returns (uint);
-    function _setComptroller(ComptrollerInterface newComptroller) public returns (uint);
-    function _setReserveFactor(uint newReserveFactorMantissa) external returns (uint);
-    function _reduceReserves(uint reduceAmount) external returns (uint);
-    function _setInterestRateModel(InterestRateModel newInterestRateModel) public returns (uint);
+    function _setPendingAdmin(address payable newPendingAdmin) virtual external returns (uint);
+    function _acceptAdmin() virtual external returns (uint);
+    function _setComptroller(ComptrollerInterface newComptroller) virtual external returns (uint);
+    function _setReserveFactor(uint newReserveFactorMantissa) virtual external returns (uint);
+    function _reduceReserves(uint reduceAmount) virtual external returns (uint);
+    function _setInterestRateModel(InterestRateModel newInterestRateModel) virtual external returns (uint);
 
 
     /*** Trusted Functions ***/
 
-    function getTrustedAdmin(address account) external view returns (bool);
-    function getTrustedSupplier(address account) external view returns (bool, uint);
-    function getTrustedBorrower(address account) external view returns (bool, uint);
-    function _setTrustedAdmin(address account, bool enabled) external returns (uint);
-    function _setTrustedSupplier(address account, bool exists, uint supplyAllowance) external returns (uint);
-    function _setTrustedBorrower(address account, bool exists, uint borrowAllowance) external returns (uint);
+    function getTrustedAdmin(address account) virtual external view returns (bool);
+    function getTrustedSupplier(address account) virtual external view returns (bool, uint);
+    function getTrustedBorrower(address account) virtual external view returns (bool, uint);
+    function _setTrustedAdmin(address account, bool enabled) virtual external returns (uint);
+    function _setTrustedSupplier(address account, bool exists, uint supplyAllowance) virtual external returns (uint);
+    function _setTrustedBorrower(address account, bool exists, uint borrowAllowance) virtual external returns (uint);
 }
 
 contract CErc20Storage {
@@ -296,29 +291,29 @@ contract CErc20Storage {
     address public underlying;
 }
 
-contract CErc20Interface is CErc20Storage {
+abstract contract CErc20Interface is CErc20Storage {
 
     /*** User Interface ***/
 
-    function mint(uint mintAmount) external returns (uint);
-    function redeem(uint redeemTokens) external returns (uint);
-    function redeemUnderlying(uint redeemAmount) external returns (uint);
-    function borrow(uint borrowAmount) external returns (uint);
-    function repayBorrow(uint repayAmount) external returns (uint);
-    function repayBorrowBehalf(address borrower, uint repayAmount) external returns (uint);
-    function liquidateBorrow(address borrower, uint repayAmount, CTokenInterface cTokenCollateral) external returns (uint);
-    function sweepToken(EIP20NonStandardInterface token) external;
+    function mint(uint mintAmount) virtual external returns (uint);
+    function redeem(uint redeemTokens) virtual external returns (uint);
+    function redeemUnderlying(uint redeemAmount) virtual external returns (uint);
+    function borrow(uint borrowAmount) virtual external returns (uint);
+    function repayBorrow(uint repayAmount) virtual external returns (uint);
+    function repayBorrowBehalf(address borrower, uint repayAmount) virtual external returns (uint);
+    function liquidateBorrow(address borrower, uint repayAmount, CTokenInterface cTokenCollateral) virtual external returns (uint);
+    function sweepToken(EIP20NonStandardInterface token) virtual external;
 
 
     /*** Admin Functions ***/
 
-    function _addReserves(uint addAmount) external returns (uint);
+    function _addReserves(uint addAmount) virtual external returns (uint);
 
 
     /*** Trusted Functions ***/
 
-    function borrowTrusted(uint totalAmount, uint borrowAmount, address treasury) external returns (uint);
-    function repayBorrowBehalfTrusted(address borrower, uint repayAmount) external returns (uint);
+    function borrowTrusted(uint totalAmount, uint borrowAmount, address treasury) virtual external returns (uint);
+    function repayBorrowBehalfTrusted(address borrower, uint repayAmount) virtual external returns (uint);
 }
 
 contract CDelegationStorage {
@@ -328,7 +323,7 @@ contract CDelegationStorage {
     address public implementation;
 }
 
-contract CDelegatorInterface is CDelegationStorage {
+abstract contract CDelegatorInterface is CDelegationStorage {
     /**
      * @notice Emitted when implementation is changed
      */
@@ -340,19 +335,19 @@ contract CDelegatorInterface is CDelegationStorage {
      * @param allowResign Flag to indicate whether to call _resignImplementation on the old implementation
      * @param becomeImplementationData The encoded bytes data to be passed to _becomeImplementation
      */
-    function _setImplementation(address implementation_, bool allowResign, bytes memory becomeImplementationData) public;
+    function _setImplementation(address implementation_, bool allowResign, bytes memory becomeImplementationData) virtual external;
 }
 
-contract CDelegateInterface is CDelegationStorage {
+abstract contract CDelegateInterface is CDelegationStorage {
     /**
      * @notice Called by the delegator on a delegate to initialize it for duty
      * @dev Should revert if any issues arise which make it unfit for delegation
      * @param data The encoded bytes data for any initialization
      */
-    function _becomeImplementation(bytes memory data) public;
+    function _becomeImplementation(bytes memory data) virtual external;
 
     /**
      * @notice Called by the delegator on a delegate to forfeit its responsibility
      */
-    function _resignImplementation() public;
+    function _resignImplementation() virtual external;
 }
