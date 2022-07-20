@@ -7,6 +7,6 @@ pragma solidity ^0.8.10;
 contract ConstantPriceOracle {
     function getUnderlyingPrice(address cToken) external view returns (uint) {
         cToken;
-        return 2e18;
+        return 1e18;
     }
 }
