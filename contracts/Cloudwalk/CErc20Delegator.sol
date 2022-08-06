@@ -489,23 +489,42 @@ contract CErc20Delegator is CTokenInterface, CErc20Interface, CDelegatorInterfac
     }
 
     /**
-     * @notice Checks if the account is a trusted supplier
+     * @notice Gets trusted supplier account
      * @param account The address to check
-     * @return (true if trusted supplier, supply allowance)
+     * @return Trusted supplier account
      */
-    function getTrustedSupplier(address account) override external view returns (bool, uint) {
+    function getTrustedSupplier(address account) override external view returns (TrustedSupplier memory) {
         bytes memory data = delegateToViewImplementation(abi.encodeWithSignature("getTrustedSupplier(address)", account));
-        return abi.decode(data, (bool, uint));
+        return abi.decode(data, (TrustedSupplier));
     }
 
     /**
-     * @notice Checks if the account is a trusted borrower
+     * @notice Gets trusted borrower account
      * @param account The address to check
-     * @return (true if trusted borrower, borrow allowance)
+     * @return Trusted borrower account
      */
-    function getTrustedBorrower(address account) override external view returns (bool, uint) {
+    function getTrustedBorrower(address account) override external view returns (TrustedBorrower memory) {
         bytes memory data = delegateToViewImplementation(abi.encodeWithSignature("getTrustedBorrower(address)", account));
-        return abi.decode(data, (bool, uint));
+        return abi.decode(data, (TrustedBorrower));
+    }
+
+    /**
+     * @notice Gets active trusted borrows sub-array
+     * @param cursor The the starting index for enumeration
+     * @param count The count of items to be returned
+     * @return Array of trusted borrow details
+     */
+    function getActiveTrustedBorrows(uint cursor, uint count) override external view returns (TrustedBorrow[] memory) {
+        bytes memory data = delegateToViewImplementation(abi.encodeWithSignature("getActiveTrustedBorrows(uint256,uint256)", cursor, count));
+        return abi.decode(data, (TrustedBorrow[]));
+    }
+
+    /**
+     * @notice Gets active trusted borrow count
+     */
+    function getActiveTrustedBorrowCount() override external view returns (uint) {
+        bytes memory data = delegateToViewImplementation(abi.encodeWithSignature("getActiveTrustedBorrowCount()"));
+        return abi.decode(data, (uint));
     }
 
     /**

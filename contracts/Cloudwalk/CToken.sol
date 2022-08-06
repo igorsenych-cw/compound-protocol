@@ -595,6 +595,14 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
         // EFFECTS & INTERACTIONS
         // (No safe failures beyond this point)
 
+        /* We update active trusted borrower details */
+        TrustedBorrower storage trustedBorrower = trustedBorrowers[borrower];
+        if (trustedBorrower.exists && accountBorrowsPrev == 0) {
+            trustedBorrower.activeBorrowerIndex = activeTrustedBorrowers.length;
+            trustedBorrower.activeBorrowTimestamp = block.timestamp;
+            activeTrustedBorrowers.push(borrower);
+        }
+
         /*
          * We write the previously calculated values into storage.
          *  Note: Avoid token reentrancy attacks by writing increased borrow before external transfer.
@@ -681,6 +689,20 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
          */
         uint accountBorrowsNew = accountBorrowsPrev - actualRepayAmount;
         uint totalBorrowsNew = totalBorrows - actualRepayAmount;
+
+        /* We update active trusted borrower details */
+        TrustedBorrower storage trustedBorrower = trustedBorrowers[borrower];
+        if (trustedBorrower.exists && accountBorrowsNew == 0) {
+            uint borrowerIndex = trustedBorrower.activeBorrowerIndex;
+            if (borrowerIndex != activeTrustedBorrowers.length - 1) {
+                address lastBorrowerAddress = activeTrustedBorrowers[activeTrustedBorrowers.length - 1];
+                trustedBorrowers[lastBorrowerAddress].activeBorrowerIndex = borrowerIndex;
+                activeTrustedBorrowers[borrowerIndex] = lastBorrowerAddress;
+            }
+            trustedBorrower.activeBorrowTimestamp = 0;
+            trustedBorrower.activeBorrowerIndex = 0;
+            activeTrustedBorrowers.pop();
+        }
 
         /* We write the previously calculated values into storage */
         accountBorrows[borrower].principal = accountBorrowsNew;
@@ -1164,23 +1186,54 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
     }
 
     /**
-     * @notice Checks if the account is a trusted supplier
+     * @notice Gets trusted supplier account
      * @param account The address to check
-     * @return (true if trusted supplier, supply allowance)
+     * @return Trusted supplier account
      */
-    function getTrustedSupplier(address account) override external view returns (bool, uint) {
-        TrustedAccount memory supplier = trustedSuppliers[account];
-        return (supplier.exists, supplier.allowance);
+    function getTrustedSupplier(address account) override external view returns (TrustedSupplier memory) {
+        return trustedSuppliers[account];
     }
 
     /**
-     * @notice Checks if the account is a trusted borrower
+     * @notice Gets trusted borrower account
      * @param account The address to check
-     * @return (true if trusted borrower, borrow allowance)
+     * @return Trusted borrower account
      */
-    function getTrustedBorrower(address account) override external view returns (bool, uint) {
-        TrustedAccount memory borrower = trustedBorrowers[account];
-        return (borrower.exists, borrower.allowance);
+    function getTrustedBorrower(address account) override external view returns (TrustedBorrower memory) {
+        return trustedBorrowers[account];
+    }
+
+    /**
+     * @notice Gets active trusted borrows sub-array
+     * @param cursor The the starting index for enumeration
+     * @param count The count of items to be returned
+     * @return Array of trusted borrow details
+     */
+    function getActiveTrustedBorrows(uint cursor, uint count) override external view returns (TrustedBorrow[] memory) {
+        uint length = count;
+        if (length > activeTrustedBorrowers.length - cursor) {
+            length = activeTrustedBorrowers.length - cursor;
+        }
+
+        address borrower;
+        TrustedBorrow[] memory borrows = new TrustedBorrow[](length);
+
+        for (uint i = 0; i < length; i++) {
+            borrower = activeTrustedBorrowers[cursor + i];
+            borrows[i] = TrustedBorrow(
+                borrower,
+                borrowBalanceStoredInternal(borrower),
+                trustedBorrowers[borrower].activeBorrowTimestamp);
+        }
+
+        return borrows;
+    }
+
+    /**
+     * @notice Gets active trusted borrow count
+     */
+    function getActiveTrustedBorrowCount() override external view returns (uint) {
+        return activeTrustedBorrowers.length;
     }
 
     /**
@@ -1212,8 +1265,8 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
             revert SetTrustedSupplierOwnerCheck();
         }
 
-        TrustedAccount storage supplier = trustedSuppliers[account];
-        emit TrustedSupplier(account, supplier.exists, supplier.allowance, exists, supplyAllowance);
+        TrustedSupplier storage supplier = trustedSuppliers[account];
+        emit TrustedSupplierChanged(account, supplier.exists, supplier.allowance, exists, supplyAllowance);
 
         supplier.allowance = supplyAllowance;
         supplier.exists = exists;
@@ -1233,8 +1286,8 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
             revert SetTrustedBorrowerOwnerCheck();
         }
 
-        TrustedAccount storage borrower = trustedBorrowers[account];
-        emit TrustedBorrower(account, borrower.exists, borrower.allowance, exists, borrowAllowance);
+        TrustedBorrower storage borrower = trustedBorrowers[account];
+        emit TrustedBorrowerChanged(account, borrower.exists, borrower.allowance, exists, borrowAllowance);
 
         borrower.allowance = borrowAllowance;
         borrower.exists = exists;

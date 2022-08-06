@@ -117,27 +117,42 @@ contract CTokenStorage {
     mapping(address => BorrowSnapshot) internal accountBorrows;
 
     /**
-     * @notice Container for trusted account information
+     * @notice Container for trusted supplier account
      */
-    struct TrustedAccount {
+    struct TrustedSupplier {
         uint allowance;
+        bool exists;
+    }
+
+    /**
+     * @notice Container for trusted borrower account
+     */
+    struct TrustedBorrower {
+        uint allowance;
+        uint activeBorrowTimestamp;
+        uint activeBorrowerIndex;
         bool exists;
     }
 
     /**
      * @notice Trusted suppliers mapping
      */
-    mapping(address => TrustedAccount) internal trustedSuppliers;
+    mapping(address => TrustedSupplier) internal trustedSuppliers;
 
     /**
      * @notice Trusted borrowers mapping
      */
-    mapping(address => TrustedAccount) internal trustedBorrowers;
+    mapping(address => TrustedBorrower) internal trustedBorrowers;
 
     /**
      * @notice Trusted admins mapping
      */
     mapping(address => bool) internal trustedAdmins;
+
+    /**
+     * @notice Active trusted borrowers array
+     */
+    address[] internal activeTrustedBorrowers;
 }
 
 abstract contract CTokenInterface is CTokenStorage {
@@ -230,12 +245,12 @@ abstract contract CTokenInterface is CTokenStorage {
     /**
      * @notice Event emitted when trusted supplier is configured
      */
-    event TrustedSupplier(address indexed account, bool oldExists, uint oldAllowance, bool newExists, uint newAllowance);
+    event TrustedSupplierChanged(address indexed account, bool oldExists, uint oldAllowance, bool newExists, uint newAllowance);
 
     /**
      * @notice Event emitted when trusted borrower is configured
      */
-    event TrustedBorrower(address indexed account, bool oldExists, uint oldAllowance, bool newExists, uint newAllowance);
+    event TrustedBorrowerChanged(address indexed account, bool oldExists, uint oldAllowance, bool newExists, uint newAllowance);
 
     /**
      * @notice Event emitted when trusted admin is configured
@@ -276,9 +291,20 @@ abstract contract CTokenInterface is CTokenStorage {
 
     /*** Trusted Functions ***/
 
+    /**
+     * @notice Container for trusted borrow details
+     */
+    struct TrustedBorrow {
+        address borrower;
+        uint borrowBalance;
+        uint borrowTimestamp;
+    }
+
     function getTrustedAdmin(address account) virtual external view returns (bool);
-    function getTrustedSupplier(address account) virtual external view returns (bool, uint);
-    function getTrustedBorrower(address account) virtual external view returns (bool, uint);
+    function getTrustedSupplier(address account) virtual external view returns (TrustedSupplier memory);
+    function getTrustedBorrower(address account) virtual external view returns (TrustedBorrower memory);
+    function getActiveTrustedBorrows(uint cursor, uint count) virtual external view returns (TrustedBorrow[] memory);
+    function getActiveTrustedBorrowCount() virtual external view returns (uint);
     function _setTrustedAdmin(address account, bool enabled) virtual external returns (uint);
     function _setTrustedSupplier(address account, bool exists, uint supplyAllowance) virtual external returns (uint);
     function _setTrustedBorrower(address account, bool exists, uint borrowAllowance) virtual external returns (uint);

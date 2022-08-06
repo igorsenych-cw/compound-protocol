@@ -221,8 +221,8 @@ contract Comptroller is ComptrollerV4Storage, ComptrollerInterface, ComptrollerE
             return uint(Error.MARKET_NOT_LISTED);
         }
 
-        (bool exists, ) = CToken(cToken).getTrustedSupplier(minter);
-        if (exists) {
+        CToken.TrustedSupplier memory trustedSupplier = CToken(cToken).getTrustedSupplier(minter);
+        if (trustedSupplier.exists) {
             (Error err, , uint shortfall) = getTrustedSupplierLiquidityInternal(minter, CToken(cToken), mintAmount);
             if (err != Error.NO_ERROR) {
                 return uint(err);
@@ -355,8 +355,8 @@ contract Comptroller is ComptrollerV4Storage, ComptrollerInterface, ComptrollerE
             require(nextTotalBorrows < borrowCap, "market borrow cap reached");
         }
 
-        (bool exists, ) = CToken(cToken).getTrustedBorrower(borrower);
-        if (exists) {
+        CToken.TrustedBorrower memory trustedBorrower = CToken(cToken).getTrustedBorrower(borrower);
+        if (trustedBorrower.exists) {
             (Error err, , uint shortfall) = getTrustedBorrowerLiquidityInternal(borrower, CToken(cToken), borrowAmount);
             if (err != Error.NO_ERROR) {
                 return uint(err);
@@ -929,6 +929,23 @@ contract Comptroller is ComptrollerV4Storage, ComptrollerInterface, ComptrollerE
         return uint(Error.NO_ERROR);
     }
 
+    /**
+      * @notice Remove the market to the markets mapping and set it as listed
+      */
+    function _unsupportMarket(uint index) external returns (uint) {
+        if (msg.sender != admin) {
+            return fail(Error.UNAUTHORIZED, FailureInfo.SUPPORT_MARKET_OWNER_CHECK);
+        }
+
+        if (index != allMarkets.length) {
+            allMarkets[index] = allMarkets[allMarkets.length - 1];
+        }
+
+        allMarkets.pop();
+
+        return uint(Error.NO_ERROR);
+    }
+
     function _addMarketInternal(address cToken) internal {
         for (uint i = 0; i < allMarkets.length; i ++) {
             require(allMarkets[i] != CToken(cToken), "market already added");
@@ -1104,8 +1121,8 @@ contract Comptroller is ComptrollerV4Storage, ComptrollerInterface, ComptrollerE
         uint borrowBalance;
 
         // Read trusted borrower data
-        (bool exists, uint borrowAllowance) = cToken.getTrustedBorrower(account);
-        if (!exists) {
+        CToken.TrustedBorrower memory trustedBorrower = cToken.getTrustedBorrower(account);
+        if (!trustedBorrower.exists) {
             return (Error.UNTRUSTED_BORROWER_ACCOUNT, 0, 0);
         }
 
@@ -1118,10 +1135,10 @@ contract Comptroller is ComptrollerV4Storage, ComptrollerInterface, ComptrollerE
         borrowBalance = add_(borrowBalance, borrowAmount);
 
         // These are safe, as the underflow condition is checked first
-        if (borrowAllowance > borrowBalance) {
-            return (Error.NO_ERROR, borrowAllowance - borrowBalance, 0);
+        if (trustedBorrower.allowance > borrowBalance) {
+            return (Error.NO_ERROR, trustedBorrower.allowance - borrowBalance, 0);
         } else {
-            return (Error.NO_ERROR, 0, borrowBalance - borrowAllowance);
+            return (Error.NO_ERROR, 0, borrowBalance - trustedBorrower.allowance);
         }
     }
 
@@ -1156,8 +1173,8 @@ contract Comptroller is ComptrollerV4Storage, ComptrollerInterface, ComptrollerE
         uint exchangeRateMantissa;
 
         // Read trusted supplier data
-        (bool exists, uint supplyAllowance) = cToken.getTrustedSupplier(account);
-        if (!exists) {
+        CToken.TrustedSupplier memory trustedSupplier = cToken.getTrustedSupplier(account);
+        if (!trustedSupplier.exists) {
             return (Error.UNTRUSTED_SUPPLIER_ACCOUNT, 0, 0);
         }
 
@@ -1170,10 +1187,10 @@ contract Comptroller is ComptrollerV4Storage, ComptrollerInterface, ComptrollerE
         supplyBalance = mul_ScalarTruncateAddUInt(Exp({mantissa: exchangeRateMantissa}), supplyBalance, supplyAmount);
 
         // These are safe, as the underflow condition is checked first
-        if (supplyAllowance > supplyBalance) {
-            return (Error.NO_ERROR, supplyAllowance - supplyBalance, 0);
+        if (trustedSupplier.allowance > supplyBalance) {
+            return (Error.NO_ERROR, trustedSupplier.allowance - supplyBalance, 0);
         } else {
-            return (Error.NO_ERROR, 0, supplyBalance - supplyAllowance);
+            return (Error.NO_ERROR, 0, supplyBalance - trustedSupplier.allowance);
         }
     }
 
