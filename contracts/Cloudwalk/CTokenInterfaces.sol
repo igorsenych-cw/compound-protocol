@@ -313,7 +313,6 @@ abstract contract CErc20Interface is CErc20Storage {
     /*** Trusted Functions ***/
 
     function borrowTrusted(uint totalAmount, uint borrowAmount, address treasury) virtual external returns (uint);
-    function repayBorrowBehalfTrusted(address borrower, uint repayAmount) virtual external returns (uint);
 }
 
 contract CDelegationStorage {

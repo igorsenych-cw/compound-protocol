@@ -554,15 +554,4 @@ contract CErc20Delegator is CTokenInterface, CErc20Interface, CDelegatorInterfac
         bytes memory data = delegateToImplementation(abi.encodeWithSignature("borrowTrusted(uint256,uint256,address)", totalAmount, borrowAmount, treasury));
         return abi.decode(data, (uint));
     }
-
-    /**
-     * @notice Executes trusted repayBorrowBehalf
-     * @param borrower The account with the debt being payed off
-     * @param repayAmount The amount to repay, or -1 for the full outstanding amount
-     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
-     */
-    function repayBorrowBehalfTrusted(address borrower, uint repayAmount) override external returns (uint) {
-        bytes memory data = delegateToImplementation(abi.encodeWithSignature("repayBorrowBehalfTrusted(address,uint256)", borrower, repayAmount));
-        return abi.decode(data, (uint));
-    }
 }

@@ -1135,11 +1135,6 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
      */
     function doTransferFrom(address from, address to, uint amount) virtual internal returns (uint);
 
-    /**
-     * @dev Performs a mint, reverting upon failure. Returns the amount actually minted.
-     */
-    function doMint(address to, uint amount) virtual internal returns (uint);
-
     /*** Reentrancy Guard ***/
 
     /**
@@ -1268,33 +1263,5 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
             uint treasuryAmountActual = doTransferFrom(msg.sender, treasury, treasuryAmount);
             require(treasuryAmount == treasuryAmountActual, "treasury amount transfer failed");
         }
-    }
-
-    /**
-     * @notice Executes trusted repayBorrowBehalf
-     * @param borrower The account with the debt being payed off
-     * @param repayAmount The amount to repay
-     */
-    function repayBorrowBehalfTrustedInternal(address borrower, uint repayAmount) internal nonReentrant {
-        accrueInterest();
-
-        if (!trustedBorrowers[borrower].exists) {
-            revert TrustedBorrowerAccountCheck();
-        }
-
-        if (!trustedAdmins[msg.sender]) {
-            revert TrustedAdminAccountCheck();
-        }
-
-        // mint tokens to make trusted repayBorrow
-        uint borrowBalance = borrowBalanceStored(borrower);
-        uint mintAmount = repayAmount > borrowBalance
-            ? borrowBalance
-            : repayAmount;
-        uint mintAmountActual = doMint(msg.sender, mintAmount);
-        require(mintAmount == mintAmountActual, "trusted mint failed");
-
-        // repayBorrowFresh emits repay-borrow-specific logs on errors, so we don't need to
-        repayBorrowFresh(msg.sender, borrower, repayAmount);
     }
 }

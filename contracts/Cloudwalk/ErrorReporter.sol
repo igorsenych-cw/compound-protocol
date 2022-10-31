@@ -133,7 +133,6 @@ contract TokenErrorReporter {
     error SetTrustedSupplierOwnerCheck();
     error SetTrustedBorrowerOwnerCheck();
 
-    error TrustedAdminAccountCheck();
     error TrustedBorrowerAccountCheck();
     error TrustedSupplierAccountCheck();
     error TrustedBorrowAmountCheck();

@@ -250,24 +250,6 @@ contract CErc20 is CToken, CErc20Interface {
         return balanceAfter - balanceBefore;   // underflow already checked above, just subtract
     }
 
-    /**
-     * @dev Executes `mint` and handles a False result and reverts in that case.
-     *      This function returns the actual amount minted.
-     */
-    function doMint(address to, uint amount) override internal returns (uint) {
-        // Read from storage once
-        address underlying_ = underlying;
-        EIP20MintableInterface token = EIP20MintableInterface(underlying_);
-        uint balanceBefore = EIP20Interface(underlying_).balanceOf(to);
-
-        bool success = token.mint(to, amount);
-        require(success, "TOKEN_MINT_FAILED");
-
-        // Calculate the amount that was *actually* minted
-        uint balanceAfter = EIP20Interface(underlying_).balanceOf(to);
-        return balanceAfter - balanceBefore; // underflow already checked above, just subtract
-    }
-
     /*** Trusted Functions ***/
 
     /**
@@ -279,17 +261,6 @@ contract CErc20 is CToken, CErc20Interface {
       */
     function borrowTrusted(uint totalAmount, uint borrowAmount, address treasury) override external returns (uint) {
         borrowTrustedInternal(totalAmount, borrowAmount, treasury);
-        return NO_ERROR;
-    }
-
-    /**
-     * @notice Trusted sender repays a borrow belonging to borrower
-     * @param borrower the account with the debt being payed off
-     * @param repayAmount The amount to repay, or -1 for the full outstanding amount
-     * @return uint 0=success, otherwise a failure (see ErrorReporter.sol for details)
-     */
-    function repayBorrowBehalfTrusted(address borrower, uint repayAmount) override external returns (uint) {
-        repayBorrowBehalfTrustedInternal(borrower, repayAmount);
         return NO_ERROR;
     }
 }
