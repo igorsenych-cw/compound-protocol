@@ -2,7 +2,6 @@
 pragma solidity ^0.8.10;
 
 import "./CToken.sol";
-import "./EIP20MintableInterface.sol";
 
 /**
  * @title Compound's CErc20 Contract
