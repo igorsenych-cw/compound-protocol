@@ -10,6 +10,7 @@ contract TransientBorrowRateModel is InterestRateModel {
     event OwnerChanged(address indexed newOwner, address indexed oldOwner);
     event ManagerChanged(address indexed newManager, address indexed oldManager);
     event NewRatePerBlock(uint256 newRatePerBlock, uint256 oldRatePerBlock);
+    event NewBlocksPerYear(uint256 newBlocksPerYear, uint256 oldBlocksPerYear);
 
     /**
      * @dev Contract owner address
@@ -147,6 +148,21 @@ contract TransientBorrowRateModel is InterestRateModel {
         require(newOwner != address(0), "new owner is the zero address");
         emit OwnerChanged(newOwner, owner);
         owner = newOwner;
+    }
+
+    /**
+     * @dev Transfers ownership of the contract to a new account (`newOwner`)
+     * Can only be called by the current owner
+     */
+    function updateBlocksPerYear(uint256 newBlocksPerYear)
+        external
+        onlyManager
+    {
+        require(newBlocksPerYear >= blocksPerYearMin, "max out of range");
+        require(newBlocksPerYear <= blocksPerYearMax, "min out of range");
+        emit NewBlocksPerYear(newBlocksPerYear, blocksPerYear);
+        blocksPerYear = newBlocksPerYear;
+        UpdateRatePerBlock();
     }
 
     function UpdateRatePerBlock() internal {
