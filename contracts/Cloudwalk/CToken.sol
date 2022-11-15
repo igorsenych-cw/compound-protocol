@@ -553,9 +553,6 @@ abstract contract CToken is CTokenInterface, ExponentialNoError, TokenErrorRepor
       * @param borrowAmount The amount of the underlying asset to borrow
       */
     function borrowInternal(uint borrowAmount) internal nonReentrant {
-        if (trustedBorrowers[msg.sender].exists) {
-            revert TrustedBorrowerAccountCheck();
-        }
         accrueInterest();
         // borrowFresh emits borrow-specific logs on errors, so we don't need to
         borrowFresh(payable(msg.sender), borrowAmount);
